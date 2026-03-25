@@ -61,7 +61,7 @@ DB_PATH = "monitoring.db"
 
 # ─── 스케줄러 설정 ──────────────────────────────────────────────
 # 모니터링 주기 (분 단위)
-SCHEDULE_INTERVAL_MINUTES = 60
+SCHEDULE_INTERVAL_MINUTES = 30
 
 # ─── 로깅 설정 ──────────────────────────────────────────────────
 LOG_FILE = "monitor.log"
