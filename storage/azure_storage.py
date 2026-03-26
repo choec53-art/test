@@ -138,9 +138,7 @@ class AzureTableStorage(StorageBackend):
 
     def _query_all(self, table, query_filter: str = "", select=None) -> list[dict]:
         """테이블에서 조건에 맞는 모든 엔티티를 list[dict]로 반환"""
-        kwargs = {}
-        if query_filter:
-            kwargs["query_filter"] = query_filter
+        kwargs = {"query_filter": query_filter} if query_filter else {"query_filter": ""}
         if select:
             kwargs["select"] = select
         return [dict(e) for e in table.query_entities(**kwargs)]
