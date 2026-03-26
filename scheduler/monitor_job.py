@@ -8,7 +8,7 @@ import os
 
 from dotenv import load_dotenv
 
-from config import SEARCH_KEYWORDS, SCHEDULE_INTERVAL_MINUTES
+from config import SEARCH_KEYWORDS, SCHEDULE_INTERVAL_MINUTES, SEARCH_DISPLAY, SEARCH_DAYS
 from crawler.naver_crawler import NaverCrawler
 from analyzer.content_analyzer import ContentAnalyzer
 from storage.database import Database
@@ -23,7 +23,7 @@ class MonitorJob:
     """단일 모니터링 사이클"""
 
     def __init__(self):
-        self.crawler = NaverCrawler()
+        self.crawler = NaverCrawler(display=SEARCH_DISPLAY)
         self.analyzer = ContentAnalyzer()
         self.db = Database()
         self.notifier = EmailNotifier()
@@ -33,7 +33,7 @@ class MonitorJob:
         logger.info("=== 모니터링 사이클 시작 ===")
 
         # 1. 크롤링
-        posts = self.crawler.collect_all(SEARCH_KEYWORDS)
+        posts = self.crawler.collect_all(SEARCH_KEYWORDS, days=SEARCH_DAYS)
 
         # 2. 신규 게시글만 필터링
         new_posts = []

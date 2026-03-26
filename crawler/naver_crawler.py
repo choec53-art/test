@@ -6,7 +6,7 @@
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import requests
@@ -124,18 +124,21 @@ class NaverCrawler:
         logger.info("[카페] '%s' 검색 결과: %d건", keyword, len(posts))
         return posts
 
-    def collect_all(self, keywords: list[str]) -> list[NaverPost]:
-        """모든 키워드에 대해 블로그 + 카페 통합 수집"""
+    def collect_all(self, keywords: list[str], days: int = 30) -> list[NaverPost]:
+        """모든 키워드에 대해 블로그 + 카페 통합 수집 (최근 N일 이내만)"""
         all_posts: list[NaverPost] = []
         seen_links: set[str] = set()
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
 
         for keyword in keywords:
             for post in self.search_blogs(keyword) + self.search_cafes(keyword):
-                if post.link not in seen_links:
+                # 카페는 postdate가 빈 문자열이므로 날짜 필터 생략
+                in_range = (not post.post_date) or (post.post_date >= cutoff)
+                if post.link not in seen_links and in_range:
                     seen_links.add(post.link)
                     all_posts.append(post)
 
-        logger.info("총 수집 게시글: %d건 (중복 제거)", len(all_posts))
+        logger.info("총 수집 게시글: %d건 (중복 제거, 최근 %d일)", len(all_posts), days)
         return all_posts
 
     @staticmethod
