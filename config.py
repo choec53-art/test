@@ -109,7 +109,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-6"
 
 # ─── 데이터베이스 설정 ──────────────────────────────────────────
-DB_PATH = "monitoring.db"
+DB_PATH = os.getenv("DB_PATH", "monitoring.db")
 
 # ─── 저장소 백엔드 설정 ─────────────────────────────────────
 # "sqlite" (기본, 로컬) 또는 "azure" (Azure Table Storage)
@@ -121,5 +121,5 @@ AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "
 SCHEDULE_INTERVAL_MINUTES = 60
 
 # ─── 로깅 설정 ──────────────────────────────────────────────────
-LOG_FILE = "monitor.log"
-LOG_LEVEL = "INFO"
+LOG_FILE = os.getenv("LOG_FILE", "monitor.log")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

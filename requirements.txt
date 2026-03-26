@@ -1,8 +1,10 @@
+azure-functions>=1.17.0
+azure-data-tables>=12.4.0
+azure-storage-blob>=12.19.0
 anthropic>=0.40.0
 openai>=1.30.0
 requests>=2.31.0
-apscheduler>=3.10.4
 python-dotenv>=1.0.0
-flask>=3.0.0
+tenacity>=8.2.0
 google-auth-oauthlib>=1.2.0
 google-auth>=2.28.0

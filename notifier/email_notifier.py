@@ -27,6 +27,11 @@ SEVERITY_COLOR = {"low": "#f0ad4e", "medium": "#d9534f", "high": "#a02020"}
 
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "token.json")
 
+# Azure Blob Storage 설정 (서버리스 환경용 OAuth2 토큰 저장)
+_BLOB_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+_BLOB_CONTAINER = "oauth-tokens"
+_BLOB_NAME = "gmail-token.json"
+
 
 class EmailNotifier:
     """이메일 알림 발송기 (OAuth2)"""
@@ -43,18 +48,74 @@ class EmailNotifier:
         )
         self.subject_prefix = cfg.get("subject_prefix", "[병원 모니터링]")
 
+    def _load_token_data(self) -> dict | None:
+        """토큰 데이터 로드 — Blob Storage 우선, 로컬 파일 폴백"""
+        # 1. Azure Blob Storage (서버리스 환경)
+        if _BLOB_CONNECTION_STRING:
+            try:
+                from azure.storage.blob import BlobServiceClient
+                blob_service = BlobServiceClient.from_connection_string(_BLOB_CONNECTION_STRING)
+                container = blob_service.get_container_client(_BLOB_CONTAINER)
+                blob = container.get_blob_client(_BLOB_NAME)
+                data = blob.download_blob().readall()
+                return json.loads(data)
+            except Exception as e:
+                logger.warning("Blob에서 토큰 로드 실패, 로컬 파일 시도: %s", e)
+
+        # 2. 환경변수 (GMAIL_TOKEN_JSON)
+        token_json_env = os.getenv("GMAIL_TOKEN_JSON", "")
+        if token_json_env:
+            try:
+                return json.loads(token_json_env)
+            except json.JSONDecodeError:
+                logger.warning("GMAIL_TOKEN_JSON 환경변수 JSON 파싱 실패")
+
+        # 3. 로컬 파일 (기존 방식)
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE) as f:
+                return json.load(f)
+
+        logger.error("OAuth2 토큰을 찾을 수 없음 — Blob/환경변수/token.json 모두 없음")
+        return None
+
+    def _save_token_data(self, token_data: dict):
+        """토큰 데이터 저장 — Blob Storage 우선, 로컬 파일 폴백"""
+        # 1. Azure Blob Storage
+        if _BLOB_CONNECTION_STRING:
+            try:
+                from azure.storage.blob import BlobServiceClient
+                blob_service = BlobServiceClient.from_connection_string(_BLOB_CONNECTION_STRING)
+                container = blob_service.get_container_client(_BLOB_CONTAINER)
+                try:
+                    container.create_container()
+                except Exception:
+                    pass  # 이미 존재
+                blob = container.get_blob_client(_BLOB_NAME)
+                blob.upload_blob(
+                    json.dumps(token_data, indent=2).encode(),
+                    overwrite=True,
+                )
+                logger.info("OAuth2 토큰 Blob Storage에 저장 완료")
+                return
+            except Exception as e:
+                logger.warning("Blob 저장 실패, 로컬 파일에 저장: %s", e)
+
+        # 2. 로컬 파일
+        try:
+            with open(TOKEN_FILE, "w") as f:
+                json.dump(token_data, f, indent=2)
+        except OSError:
+            logger.warning("로컬 token.json 저장 실패 (읽기 전용 파일시스템)")
+
     def _get_oauth2_token(self, force_refresh: bool = False) -> str | None:
-        """token.json에서 OAuth2 액세스 토큰을 읽고, 만료 시 자동 갱신
+        """OAuth2 액세스 토큰을 읽고, 만료 시 자동 갱신
 
+        토큰 소스: Azure Blob Storage → GMAIL_TOKEN_JSON 환경변수 → 로컬 token.json
         force_refresh=True이면 만료 여부와 무관하게 강제 갱신합니다.
-        (token.json에 expiry가 없으면 creds.expired가 부정확할 수 있음)
         """
-        if not os.path.exists(TOKEN_FILE):
-            logger.error("token.json 없음 — python oauth2_setup.py 를 먼저 실행하세요")
+        token_data = self._load_token_data()
+        if not token_data:
             return None
-
-        with open(TOKEN_FILE) as f:
-            token_data = json.load(f)
 
         creds = Credentials(
             token=token_data["token"],
@@ -70,8 +131,7 @@ class EmailNotifier:
             token_data["token"] = creds.token
             if creds.expiry:
                 token_data["expiry"] = creds.expiry.isoformat()
-            with open(TOKEN_FILE, "w") as f:
-                json.dump(token_data, f, indent=2)
+            self._save_token_data(token_data)
             logger.info("OAuth2 토큰 갱신 완료 (force=%s)", force_refresh)
 
         return creds.token
