@@ -13,11 +13,11 @@ from flask import Flask, jsonify, render_template, request
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from config import DB_PATH, TARGET_HOSPITAL, SCHEDULE_INTERVAL_MINUTES
-from storage.database import Database
+from config import TARGET_HOSPITAL, SCHEDULE_INTERVAL_MINUTES
+from storage import create_storage
 
 app = Flask(__name__)
-db = Database(DB_PATH)
+db = create_storage()
 
 _ADMIN_TOKEN = os.getenv("ADMIN_API_TOKEN")
 

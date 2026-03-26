@@ -111,6 +111,11 @@ CLAUDE_MODEL = "claude-sonnet-4-6"
 # ─── 데이터베이스 설정 ──────────────────────────────────────────
 DB_PATH = "monitoring.db"
 
+# ─── 저장소 백엔드 설정 ─────────────────────────────────────
+# "sqlite" (기본, 로컬) 또는 "azure" (Azure Table Storage)
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite")
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+
 # ─── 스케줄러 설정 ──────────────────────────────────────────────
 # 모니터링 주기 (분 단위)
 SCHEDULE_INTERVAL_MINUTES = 60

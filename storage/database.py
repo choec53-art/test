@@ -13,12 +13,13 @@ from datetime import datetime, timedelta
 
 from config import DB_PATH
 from analyzer.content_analyzer import AnalysisResult
+from storage.base import StorageBackend
 
 logger = logging.getLogger(__name__)
 
 
-class Database:
-    """모니터링 데이터베이스"""
+class SqliteStorage(StorageBackend):
+    """SQLite 기반 저장소 구현체"""
 
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
@@ -388,3 +389,7 @@ class Database:
                 (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+# 하위 호환: 기존 `from storage.database import Database` 유지
+Database = SqliteStorage

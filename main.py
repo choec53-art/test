@@ -38,8 +38,8 @@ def main():
     args = parser.parse_args()
 
     if args.stats:
-        from storage.database import Database
-        stats = Database().get_stats()
+        from storage import create_storage
+        stats = create_storage().get_stats()
         print("\n=== 모니터링 통계 ===")
         print(f"  총 수집 게시글  : {stats['total_posts']:,}건")
         print(f"  부적절 탐지     : {stats['total_detections']:,}건")
