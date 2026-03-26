@@ -1,17 +1,21 @@
 """
 이메일 알림 발송
 탐지된 부적절 게시글을 이메일로 보고합니다.
+OAuth2 인증을 통해 Gmail SMTP로 발송합니다.
 """
 
+import base64
+import json
 import logging
 import os
 import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
 
 from dotenv import load_dotenv
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 
 from analyzer.content_analyzer import AnalysisResult
 from config import EMAIL_CONFIG, TARGET_HOSPITAL
@@ -23,22 +27,50 @@ logger = logging.getLogger(__name__)
 SEVERITY_KR = {"low": "낮음", "medium": "보통", "high": "높음"}
 SEVERITY_COLOR = {"low": "#f0ad4e", "medium": "#d9534f", "high": "#a02020"}
 
+TOKEN_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "token.json")
+
 
 class EmailNotifier:
-    """이메일 알림 발송기"""
+    """이메일 알림 발송기 (OAuth2)"""
 
     def __init__(self):
         cfg = EMAIL_CONFIG
         self.smtp_host = cfg["smtp_host"]
         self.smtp_port = cfg["smtp_port"]
         self.sender = os.getenv("EMAIL_SENDER", cfg.get("sender_email", ""))
-        self.password = os.getenv("EMAIL_PASSWORD", cfg.get("sender_password", ""))
         raw_recipients = os.getenv("EMAIL_RECIPIENTS", "")
         self.recipients: list[str] = (
             [r.strip() for r in raw_recipients.split(",") if r.strip()]
             or cfg.get("recipient_emails", [])
         )
         self.subject_prefix = cfg.get("subject_prefix", "[병원 모니터링]")
+
+    def _get_oauth2_token(self) -> str | None:
+        """token.json에서 OAuth2 액세스 토큰을 읽고, 만료 시 자동 갱신"""
+        if not os.path.exists(TOKEN_FILE):
+            logger.error("token.json 없음 — python oauth2_setup.py 를 먼저 실행하세요")
+            return None
+
+        with open(TOKEN_FILE) as f:
+            token_data = json.load(f)
+
+        creds = Credentials(
+            token=token_data["token"],
+            refresh_token=token_data["refresh_token"],
+            token_uri=token_data["token_uri"],
+            client_id=token_data["client_id"],
+            client_secret=token_data["client_secret"],
+            scopes=token_data.get("scopes"),
+        )
+
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            token_data["token"] = creds.token
+            with open(TOKEN_FILE, "w") as f:
+                json.dump(token_data, f, indent=2)
+            logger.info("OAuth2 토큰 자동 갱신 완료")
+
+        return creds.token
 
     def _build_html(self, results: list[AnalysisResult]) -> str:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -90,13 +122,17 @@ class EmailNotifier:
 </html>"""
 
     def send(self, results: list[AnalysisResult]) -> bool:
-        """탐지 결과 이메일 발송"""
+        """탐지 결과 이메일 발송 (OAuth2 XOAUTH2)"""
         if not results:
             logger.info("탐지된 게시글 없음 — 이메일 발송 생략")
             return True
 
-        if not self.sender or not self.password or not self.recipients:
+        if not self.sender or not self.recipients:
             logger.warning("이메일 설정 미완료 (.env 확인 필요) — 발송 생략")
+            return False
+
+        access_token = self._get_oauth2_token()
+        if not access_token:
             return False
 
         subject = (
@@ -112,9 +148,10 @@ class EmailNotifier:
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         try:
+            auth_string = f"user={self.sender}\x01auth=Bearer {access_token}\x01\x01"
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
                 server.starttls()
-                server.login(self.sender, self.password)
+                server.docmd("AUTH", "XOAUTH2 " + base64.b64encode(auth_string.encode()).decode())
                 server.sendmail(self.sender, self.recipients, msg.as_string())
             logger.info("이메일 발송 성공 → %s (%d건)", self.recipients, len(results))
             return True
