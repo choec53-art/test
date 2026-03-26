@@ -26,7 +26,7 @@ def _make_result(post, is_inappropriate=True):
 
 class TestMonitorJob:
     @patch("scheduler.monitor_job.EmailNotifier")
-    @patch("scheduler.monitor_job.Database")
+    @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
     @patch("scheduler.monitor_job.NaverCrawler")
     def test_run_no_new_posts(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
@@ -40,7 +40,7 @@ class TestMonitorJob:
         job.notifier.send.assert_not_called()
 
     @patch("scheduler.monitor_job.EmailNotifier")
-    @patch("scheduler.monitor_job.Database")
+    @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
     @patch("scheduler.monitor_job.NaverCrawler")
     def test_run_with_new_posts_no_detection(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
@@ -60,7 +60,7 @@ class TestMonitorJob:
         job.notifier.send.assert_not_called()
 
     @patch("scheduler.monitor_job.EmailNotifier")
-    @patch("scheduler.monitor_job.Database")
+    @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
     @patch("scheduler.monitor_job.NaverCrawler")
     def test_run_with_detection_sends_email(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
@@ -83,7 +83,7 @@ class TestMonitorJob:
         job.db.save_detection.assert_called_once_with(result)
 
     @patch("scheduler.monitor_job.EmailNotifier")
-    @patch("scheduler.monitor_job.Database")
+    @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
     @patch("scheduler.monitor_job.NaverCrawler")
     def test_run_duplicate_posts_filtered(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
