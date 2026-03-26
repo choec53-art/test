@@ -7,15 +7,12 @@
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
-from dotenv import load_dotenv
-
 from config import INAPPROPRIATE_CATEGORIES, TARGET_HOSPITAL
 from crawler.naver_crawler import NaverPost
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -114,14 +111,12 @@ class ContentAnalyzer:
 
     def _build_prompt(self, post: NaverPost) -> str:
         content = f"제목: {post.title}\n내용: {post.description}"
+        category_list = "\n".join(f"- {cat}" for cat in INAPPROPRIATE_CATEGORIES.keys())
         return f"""당신은 병원 평판 모니터링 전문가입니다.
 아래 게시글이 '{TARGET_HOSPITAL}'에 대해 부적절한 표현을 포함하고 있는지 분석하세요.
 
 **부적절 표현 기준:**
-- 욕설, 비하 표현
-- 허위 의료 정보 유포
-- 명예훼손성 주장
-- 허위 리뷰/조작 의심 표현
+{category_list}
 
 **게시글:**
 {content}
@@ -175,6 +170,11 @@ class ContentAnalyzer:
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
+        usage = message.usage
+        if usage:
+            self._total_prompt_tokens += usage.input_tokens
+            self._total_completion_tokens += usage.output_tokens
+            self._total_requests += 1
         raw = message.content[0].text.strip()
         return self._parse_response(raw)
 
@@ -238,8 +238,14 @@ class ContentAnalyzer:
         # 1단계: 키워드 필터
         categories, matched_kws = self.keyword_filter(raw_content)
 
-        # 2단계: AI 분석
-        ai_inappropriate, ai_confidence, ai_reason, _ = self.ai_analyze(post)
+        # 2단계: AI 분석 (키워드 매칭이 없으면 LLM 호출 생략)
+        if not matched_kws:
+            ai_inappropriate = False
+            ai_confidence = 0.0
+            ai_reason = "키워드 미매칭 — AI 분석 생략"
+            severity_hint = "low"
+        else:
+            ai_inappropriate, ai_confidence, ai_reason, severity_hint = self.ai_analyze(post)
 
         # 3단계: 하이브리드 스코어 산출
         keyword_score = self._calc_keyword_score(categories, matched_kws)
@@ -265,15 +271,28 @@ class ContentAnalyzer:
         )
 
     def analyze_batch(self, posts: list[NaverPost]) -> AnalysisSummary:
-        """게시글 목록 일괄 분석"""
+        """게시글 목록 일괄 분석 (LLM 호출 병렬화)"""
         summary = AnalysisSummary(total_checked=len(posts))
 
-        for i, post in enumerate(posts, 1):
-            logger.debug("[%d/%d] 분석 중: %s", i, len(posts), post.title[:40])
-            result = self.analyze(post)
-            if result.is_inappropriate:
-                summary.inappropriate_count += 1
-                summary.results.append(result)
+        def _analyze_one(idx_post: tuple[int, NaverPost]) -> AnalysisResult:
+            idx, post = idx_post
+            logger.debug("[%d/%d] 분석 중: %s", idx, len(posts), post.title[:40])
+            return self.analyze(post)
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {
+                executor.submit(_analyze_one, (i, post)): i
+                for i, post in enumerate(posts, 1)
+            }
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result.is_inappropriate:
+                        summary.inappropriate_count += 1
+                        summary.results.append(result)
+                except Exception as e:
+                    idx = futures[future]
+                    logger.error("[%d/%d] 분석 실패: %s", idx, len(posts), e)
 
         total_tokens = self._total_prompt_tokens + self._total_completion_tokens
         logger.info(

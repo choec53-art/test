@@ -92,7 +92,7 @@ NAVER_CAFE_SEARCH_URL = "https://openapi.naver.com/v1/search/cafearticle.json"
 SEARCH_DISPLAY = 100
 
 # 검색 기간 (일 단위, 최근 N일 이내 게시글만 수집)
-SEARCH_DAYS = 30
+SEARCH_DAYS = 7
 
 # ─── 이메일 알림 설정 ───────────────────────────────────────────
 EMAIL_CONFIG = {
@@ -113,7 +113,7 @@ DB_PATH = "monitoring.db"
 
 # ─── 스케줄러 설정 ──────────────────────────────────────────────
 # 모니터링 주기 (분 단위)
-SCHEDULE_INTERVAL_MINUTES = 30
+SCHEDULE_INTERVAL_MINUTES = 60
 
 # ─── 로깅 설정 ──────────────────────────────────────────────────
 LOG_FILE = "monitor.log"
