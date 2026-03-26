@@ -156,6 +156,12 @@ class Database:
                 (limit,),
             ).fetchall()
 
+    def get_known_links(self) -> set[str]:
+        """이미 수집된 게시글 링크 목록 반환"""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT link FROM posts").fetchall()
+        return {row[0] for row in rows}
+
     def get_stats(self) -> dict:
         """통계 조회"""
         with self._conn() as conn:

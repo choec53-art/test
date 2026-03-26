@@ -32,14 +32,16 @@ class MonitorJob:
         """크롤링 → 분석 → 저장 → 알림 파이프라인 실행"""
         logger.info("=== 모니터링 사이클 시작 ===")
 
-        # 1. 크롤링
-        posts = self.crawler.collect_all(SEARCH_KEYWORDS, days=SEARCH_DAYS)
+        # 1. 기존 수집 링크 로드 → 크롤러에 전달하여 카페 게시글도 필터링
+        known_links = self.db.get_known_links()
+        posts = self.crawler.collect_all(
+            SEARCH_KEYWORDS, days=SEARCH_DAYS, known_links=known_links,
+        )
 
-        # 2. 신규 게시글만 필터링
+        # 2. 신규 게시글 저장
         new_posts = []
         for post in posts:
-            if not self.db.is_post_known(post.link):
-                self.db.save_post(post)
+            if self.db.save_post(post):
                 new_posts.append(post)
 
         logger.info("신규 게시글: %d건 (전체 수집: %d건)", len(new_posts), len(posts))

@@ -124,17 +124,32 @@ class NaverCrawler:
         logger.info("[카페] '%s' 검색 결과: %d건", keyword, len(posts))
         return posts
 
-    def collect_all(self, keywords: list[str], days: int = 30) -> list[NaverPost]:
-        """모든 키워드에 대해 블로그 + 카페 통합 수집 (최근 N일 이내만)"""
+    def collect_all(
+        self,
+        keywords: list[str],
+        days: int = 30,
+        known_links: set[str] | None = None,
+    ) -> list[NaverPost]:
+        """모든 키워드에 대해 블로그 + 카페 통합 수집
+
+        - 블로그: postdate 기반 날짜 필터링 (최근 N일)
+        - 카페: postdate 없으므로 known_links 기반 필터링
+          (이미 수집된 링크를 제외하고 신규 게시글만 반환)
+        """
         all_posts: list[NaverPost] = []
-        seen_links: set[str] = set()
+        seen_links: set[str] = set(known_links or set())
         cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
 
         for keyword in keywords:
-            for post in self.search_blogs(keyword) + self.search_cafes(keyword):
-                # 카페는 postdate가 빈 문자열이므로 날짜 필터 생략
-                in_range = (not post.post_date) or (post.post_date >= cutoff)
-                if post.link not in seen_links and in_range:
+            # 블로그: 날짜 기반 필터링
+            for post in self.search_blogs(keyword):
+                if post.link not in seen_links and post.post_date >= cutoff:
+                    seen_links.add(post.link)
+                    all_posts.append(post)
+
+            # 카페: known_links 기반 필터링 (날짜 없으므로 신규 링크만 수집)
+            for post in self.search_cafes(keyword):
+                if post.link not in seen_links:
                     seen_links.add(post.link)
                     all_posts.append(post)
 
