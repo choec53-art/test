@@ -295,18 +295,22 @@ class EmailNotifier:
                     server.sendmail(self.sender, self.recipients, msg.as_string())
                 logger.info("일일 리포트 발송 성공 → %s [%s]", self.recipients, date)
                 return True
-            except smtplib.SMTPAuthenticationError:
-                if attempt == 0:
-                    logger.warning("SMTP 인증 실패 — 토큰 강제 갱신 후 재시도")
+            except smtplib.SMTPException as e:
+                is_auth_error = (
+                    isinstance(e, smtplib.SMTPAuthenticationError)
+                    or (isinstance(e, smtplib.SMTPResponseException) and e.smtp_code in (530, 535))
+                )
+                if is_auth_error and attempt == 0:
+                    logger.warning("SMTP 인증 실패 (%s) — 토큰 강제 갱신 후 재시도", e)
                     access_token = self._get_oauth2_token(force_refresh=True)
                     if not access_token:
                         return False
-                else:
-                    logger.error("토큰 갱신 후에도 SMTP 인증 실패")
+                elif is_auth_error:
+                    logger.error("토큰 갱신 후에도 SMTP 인증 실패: %s", e)
                     return False
-            except smtplib.SMTPException as e:
-                logger.error("일일 리포트 발송 실패: %s", e)
-                return False
+                else:
+                    logger.error("일일 리포트 발송 실패: %s", e)
+                    return False
         return False
 
     # TODO: 빈번한 발송 시 SMTP connection pooling 고려
@@ -345,16 +349,20 @@ class EmailNotifier:
                     server.sendmail(self.sender, self.recipients, msg.as_string())
                 logger.info("이메일 발송 성공 → %s (%d건)", self.recipients, len(results))
                 return True
-            except smtplib.SMTPAuthenticationError:
-                if attempt == 0:
-                    logger.warning("SMTP 인증 실패 — 토큰 강제 갱신 후 재시도")
+            except smtplib.SMTPException as e:
+                is_auth_error = (
+                    isinstance(e, smtplib.SMTPAuthenticationError)
+                    or (isinstance(e, smtplib.SMTPResponseException) and e.smtp_code in (530, 535))
+                )
+                if is_auth_error and attempt == 0:
+                    logger.warning("SMTP 인증 실패 (%s) — 토큰 강제 갱신 후 재시도", e)
                     access_token = self._get_oauth2_token(force_refresh=True)
                     if not access_token:
                         return False
-                else:
-                    logger.error("토큰 갱신 후에도 SMTP 인증 실패")
+                elif is_auth_error:
+                    logger.error("토큰 갱신 후에도 SMTP 인증 실패: %s", e)
                     return False
-            except smtplib.SMTPException as e:
-                logger.error("이메일 발송 실패: %s", e)
-                return False
+                else:
+                    logger.error("이메일 발송 실패: %s", e)
+                    return False
         return False
