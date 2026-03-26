@@ -8,7 +8,7 @@ import logging
 from config import SEARCH_KEYWORDS, SCHEDULE_INTERVAL_MINUTES, SEARCH_DISPLAY, SEARCH_DAYS
 from crawler.naver_crawler import NaverCrawler
 from analyzer.content_analyzer import ContentAnalyzer
-from storage.database import Database
+from storage import create_storage
 from notifier.email_notifier import EmailNotifier
 
 logger = logging.getLogger(__name__)
@@ -20,42 +20,61 @@ class MonitorJob:
     def __init__(self):
         self.crawler = NaverCrawler(display=SEARCH_DISPLAY)
         self.analyzer = ContentAnalyzer()
-        self.db = Database()
+        self.db = create_storage()
         self.notifier = EmailNotifier()
 
     def run(self):
         """크롤링 → 분석 → 저장 → 알림 파이프라인 실행"""
         logger.info("=== 모니터링 사이클 시작 ===")
         try:
-            # 1. 기존 수집 링크 로드 → 크롤러에 전달하여 카페 게시글도 필터링
+            # 1. 기존 수집 링크 로드
             known_links = self.db.get_known_links()
+            logger.info("[1/5] known_links 로드: %d건", len(known_links))
+
+            # 2. 크롤링
             posts = self.crawler.collect_all(
                 SEARCH_KEYWORDS, days=SEARCH_DAYS, known_links=known_links,
             )
+            logger.info("[2/5] 크롤링 완료: %d건 수집 (키워드 %d개, 기간 %d일)",
+                        len(posts), len(SEARCH_KEYWORDS), SEARCH_DAYS)
 
-            # 2. 신규 게시글 저장
+            # 3. 신규 게시글 저장
             new_posts = []
+            dup_count = 0
             for post in posts:
                 if self.db.save_post(post):
                     new_posts.append(post)
+                else:
+                    dup_count += 1
 
-            logger.info("신규 게시글: %d건 (전체 수집: %d건)", len(new_posts), len(posts))
+            logger.info("[3/5] DB 저장: 신규 %d건, 중복 스킵 %d건", len(new_posts), dup_count)
 
             if not new_posts:
-                logger.info("신규 게시글 없음 — 사이클 종료")
+                stats = self.db.get_stats()
+                logger.info("=== 사이클 종료 (신규 없음) | 누적 수집: %d건, 누적 탐지: %d건 ===",
+                            stats["total_posts"], stats["total_detections"])
                 return
 
-            # 3. 분석
+            # 4. 분석
             summary = self.analyzer.analyze_batch(new_posts)
+            logger.info("[4/5] 분석 완료: 전체 %d건, 키워드 매칭 → LLM 호출 %d건, 부적절 판정 %d건",
+                        summary.total_checked,
+                        self.analyzer._total_requests,
+                        summary.inappropriate_count)
 
-            # 4. 탐지 결과 저장
+            # 5. 탐지 결과 저장
             for result in summary.results:
                 self.db.save_detection(result)
+                logger.info("  [탐지] %s | %s | 심각도=%s | 점수=%.2f | 사유=%s",
+                            result.post.source, result.post.title[:40],
+                            result.severity, result.hybrid_score, result.ai_reason[:50])
 
-            # 5. 이메일 알림
+            # 6. 이메일 알림
             if summary.results:
                 success = self.notifier.send(summary.results)
                 status = "success" if success else "failed"
+                logger.info("[5/5] 이메일 발송: %s (%d건 → %s)",
+                            status, len(summary.results), self.notifier.recipients)
                 for recipient in self.notifier.recipients:
                     self.db.save_notification(
                         recipient=recipient,
@@ -63,12 +82,14 @@ class MonitorJob:
                         post_count=len(summary.results),
                         status=status,
                     )
+            else:
+                logger.info("[5/5] 부적절 게시글 없음 — 이메일 발송 생략")
 
             stats = self.db.get_stats()
             logger.info(
-                "=== 사이클 완료 | 누적 수집: %d건, 누적 탐지: %d건 ===",
-                stats["total_posts"],
-                stats["total_detections"],
+                "=== 사이클 완료 | 신규 %d건, 탐지 %d건 | 누적 수집: %d건, 누적 탐지: %d건 ===",
+                len(new_posts), summary.inappropriate_count,
+                stats["total_posts"], stats["total_detections"],
             )
         except Exception as e:
             logger.error("모니터링 사이클 실패: %s", e, exc_info=True)
@@ -109,13 +130,13 @@ def run_scheduler():
     job = MonitorJob()
     scheduler = BlockingScheduler(timezone="Asia/Seoul")
 
-    # 모니터링 사이클: 월~토, 매시 정각 09:00~18:00
+    # 모니터링 사이클: 월~토, 09:00~18:59 매 10분
     scheduler.add_job(
         job.run,
         trigger="cron",
         day_of_week="mon-sat",
         hour="9-18",
-        minute=0,
+        minute="*/10",
         id="monitor_job",
     )
 
@@ -130,7 +151,7 @@ def run_scheduler():
     )
 
     logger.info(
-        "스케줄러 시작 — 모니터링: 월~토 09:00~18:00 매시, 일일 리포트: 19:00"
+        "스케줄러 시작 — 모니터링: 월~토 09:00~18:50 매 10분, 일일 리포트: 19:00"
     )
 
     try:
