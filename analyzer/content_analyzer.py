@@ -1,7 +1,7 @@
 """
 콘텐츠 분석기
 1단계: 키워드 기반 1차 필터링 (빠른 처리)
-2단계: Claude API 기반 문맥 분석 (정밀 판단)
+2단계: LLM 기반 문맥 분석 (AOAI 우선, Claude 폴백)
 """
 
 import json
@@ -10,10 +10,9 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-import anthropic
 from dotenv import load_dotenv
 
-from config import INAPPROPRIATE_CATEGORIES, TARGET_HOSPITAL, CLAUDE_MODEL
+from config import INAPPROPRIATE_CATEGORIES, TARGET_HOSPITAL
 from crawler.naver_crawler import NaverPost
 
 load_dotenv()
@@ -29,9 +28,12 @@ class AnalysisResult:
     confidence: float              # 0.0 ~ 1.0
     categories: list[str]          # 해당되는 부적절 카테고리들
     matched_keywords: list[str]    # 매칭된 키워드 목록
-    ai_reason: str                 # Claude의 판단 근거
+    ai_reason: str                 # AI 판단 근거
     severity: str                  # "low" | "medium" | "high"
     raw_content: str               # 분석에 사용된 전체 텍스트
+    hybrid_score: float = 0.0     # 하이브리드 스코어 (0.0 ~ 1.0)
+    keyword_score: float = 0.0    # 키워드 점수 (0.0 ~ 1.0)
+    ai_score: float = 0.0         # AI 점수 (0.0 ~ 1.0)
 
 
 @dataclass
@@ -43,24 +45,57 @@ class AnalysisSummary:
 
 
 class ContentAnalyzer:
-    """게시글 부적절 표현 분석기"""
+    """게시글 부적절 표현 분석기 (AOAI 우선, Claude 폴백)"""
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
-        self._client: Optional[anthropic.Anthropic] = None
+    def __init__(self):
+        self.provider = os.getenv("LLM_PROVIDER", "aoai")
 
-        if self.api_key:
-            self._client = anthropic.Anthropic(api_key=self.api_key)
-        else:
-            logger.warning("ANTHROPIC_API_KEY 미설정 — 키워드 분석만 사용됩니다.")
+        # AOAI 설정
+        self.aoai_endpoint = os.getenv("AOAI_ENDPOINT", "")
+        self.aoai_api_key = os.getenv("AOAI_API_KEY", "")
+        self.aoai_deployment = os.getenv("AOAI_DEPLOYMENT", "gpt-4.1")
+        self.aoai_api_version = os.getenv("AOAI_API_VERSION", "2024-12-01-preview")
+        self._aoai_client = None
+
+        # Claude 설정 (폴백)
+        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        self._anthropic_client = None
+
+        # 토큰 사용량 추적
+        self._total_prompt_tokens = 0
+        self._total_completion_tokens = 0
+        self._total_requests = 0
+
+        self._init_clients()
+
+    def _init_clients(self):
+        """LLM 클라이언트 초기화"""
+        if self.aoai_endpoint and self.aoai_api_key:
+            try:
+                from openai import AzureOpenAI
+                self._aoai_client = AzureOpenAI(
+                    azure_endpoint=self.aoai_endpoint,
+                    api_key=self.aoai_api_key,
+                    api_version=self.aoai_api_version,
+                )
+                logger.info("AOAI 클라이언트 초기화 완료 (deployment: %s)", self.aoai_deployment)
+            except Exception as e:
+                logger.warning("AOAI 클라이언트 초기화 실패: %s", e)
+
+        if self.anthropic_api_key:
+            try:
+                import anthropic
+                self._anthropic_client = anthropic.Anthropic(api_key=self.anthropic_api_key)
+                logger.info("Claude 클라이언트 초기화 완료 (폴백)")
+            except Exception as e:
+                logger.warning("Claude 클라이언트 초기화 실패: %s", e)
+
+        if not self._aoai_client and not self._anthropic_client:
+            logger.warning("LLM 클라이언트 없음 — 키워드 분석만 사용됩니다.")
 
     # ─── 1단계: 키워드 필터링 ───────────────────────────────────────
 
     def keyword_filter(self, text: str) -> tuple[list[str], list[str]]:
-        """
-        텍스트에서 부적절 키워드 탐지.
-        반환: (매칭된_카테고리_목록, 매칭된_키워드_목록)
-        """
         matched_categories = []
         matched_keywords = []
         lower_text = text.lower()
@@ -75,18 +110,11 @@ class ContentAnalyzer:
 
         return matched_categories, matched_keywords
 
-    # ─── 2단계: Claude AI 문맥 분석 ────────────────────────────────
+    # ─── 2단계: LLM 문맥 분석 ────────────────────────────────────────
 
-    def ai_analyze(self, post: NaverPost) -> tuple[bool, float, str, str]:
-        """
-        Claude API로 게시글 문맥 분석.
-        반환: (부적절여부, 신뢰도, 판단근거, 심각도)
-        """
-        if not self._client:
-            return False, 0.0, "API 키 없음 — AI 분석 생략", "low"
-
+    def _build_prompt(self, post: NaverPost) -> str:
         content = f"제목: {post.title}\n내용: {post.description}"
-        prompt = f"""당신은 병원 평판 모니터링 전문가입니다.
+        return f"""당신은 병원 평판 모니터링 전문가입니다.
 아래 게시글이 '{TARGET_HOSPITAL}'에 대해 부적절한 표현을 포함하고 있는지 분석하세요.
 
 **부적절 표현 기준:**
@@ -106,57 +134,134 @@ class ContentAnalyzer:
   "reason": "판단 근거를 한국어로 2~3문장으로 설명"
 }}"""
 
-        try:
-            message = self._client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=512,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = message.content[0].text.strip()
-            # JSON 파싱
-            data = json.loads(raw)
-            return (
-                bool(data.get("is_inappropriate", False)),
-                float(data.get("confidence", 0.0)),
-                str(data.get("reason", "")),
-                str(data.get("severity", "low")),
-            )
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            logger.error("AI 분석 결과 파싱 실패: %s", e)
-            return False, 0.0, "파싱 오류", "low"
-        except anthropic.APIError as e:
-            logger.error("Claude API 오류: %s", e)
-            return False, 0.0, f"API 오류: {e}", "low"
+    def _parse_response(self, raw: str) -> tuple[bool, float, str, str]:
+        """LLM 응답 JSON 파싱"""
+        # JSON 블록 추출 (```json ... ``` 처리)
+        if "```" in raw:
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            raw = raw[start:end]
+        data = json.loads(raw)
+        return (
+            bool(data.get("is_inappropriate", False)),
+            float(data.get("confidence", 0.0)),
+            str(data.get("reason", "")),
+            str(data.get("severity", "low")),
+        )
 
-    # ─── 통합 분석 ──────────────────────────────────────────────────
+    def _analyze_aoai(self, post: NaverPost) -> tuple[bool, float, str, str]:
+        """Azure OpenAI로 분석"""
+        prompt = self._build_prompt(post)
+        response = self._aoai_client.chat.completions.create(
+            model=self.aoai_deployment,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=512,
+            temperature=0,
+        )
+        usage = response.usage
+        if usage:
+            self._total_prompt_tokens += usage.prompt_tokens
+            self._total_completion_tokens += usage.completion_tokens
+            self._total_requests += 1
+        raw = response.choices[0].message.content.strip()
+        return self._parse_response(raw)
+
+    def _analyze_claude(self, post: NaverPost) -> tuple[bool, float, str, str]:
+        """Claude API로 분석"""
+        import anthropic
+        prompt = self._build_prompt(post)
+        message = self._anthropic_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        return self._parse_response(raw)
+
+    def ai_analyze(self, post: NaverPost) -> tuple[bool, float, str, str]:
+        """AOAI 우선, 실패 시 Claude 폴백"""
+        # 1차: AOAI
+        if self._aoai_client:
+            try:
+                result = self._analyze_aoai(post)
+                return result
+            except Exception as e:
+                logger.warning("AOAI 분석 실패, Claude 폴백 시도: %s", e)
+
+        # 2차: Claude 폴백
+        if self._anthropic_client:
+            try:
+                result = self._analyze_claude(post)
+                return result
+            except Exception as e:
+                logger.error("Claude 폴백도 실패: %s", e)
+
+        return False, 0.0, "LLM 분석 불가", "low"
+
+    # ─── 하이브리드 스코어링 ─────────────────────────────────────────
+    # LLM 70% + 키워드 30%, 임계값 0.5 이상이면 부적절 판정
+
+    WEIGHT_AI = 0.7
+    WEIGHT_KEYWORD = 0.3
+    HYBRID_THRESHOLD = 0.5
+
+    def _calc_keyword_score(self, categories: list[str], matched_kws: list[str]) -> float:
+        """키워드 매칭 기반 점수 산출 (0.0 ~ 1.0)"""
+        if not matched_kws:
+            return 0.0
+        # 카테고리 다양성 + 키워드 수로 점수 산출
+        cat_score = min(len(categories) / 3.0, 1.0)   # 3개 카테고리 이상이면 만점
+        kw_score = min(len(matched_kws) / 5.0, 1.0)   # 5개 키워드 이상이면 만점
+        return (cat_score * 0.4) + (kw_score * 0.6)
+
+    def _calc_ai_score(self, ai_inappropriate: bool, confidence: float) -> float:
+        """AI 판단 기반 부적절 점수 산출 (0.0 ~ 1.0)
+        - 부적절 판단 시: 신뢰도 그대로 (높을수록 위험)
+        - 정상 판단 시: 0.0 (AI가 정상이라고 판단했으므로 부적절 점수 없음)
+        """
+        if ai_inappropriate:
+            return confidence
+        return 0.0
+
+    def _determine_severity(self, hybrid_score: float) -> str:
+        """하이브리드 스코어 기반 심각도 결정"""
+        if hybrid_score >= 0.8:
+            return "high"
+        if hybrid_score >= 0.6:
+            return "medium"
+        return "low"
 
     def analyze(self, post: NaverPost) -> AnalysisResult:
-        """게시글 단건 분석"""
+        """게시글 단건 하이브리드 분석 (LLM 70% + 키워드 30%)"""
         raw_content = f"{post.title} {post.description}"
 
         # 1단계: 키워드 필터
         categories, matched_kws = self.keyword_filter(raw_content)
-        keyword_hit = len(categories) > 0
 
-        # 2단계: AI 분석 (키워드 히트 여부와 무관하게 실행)
-        ai_inappropriate, confidence, ai_reason, severity = self.ai_analyze(post)
+        # 2단계: AI 분석
+        ai_inappropriate, ai_confidence, ai_reason, _ = self.ai_analyze(post)
 
-        # 최종 판단: 키워드 히트 OR AI 판단
-        is_inappropriate = keyword_hit or ai_inappropriate
+        # 3단계: 하이브리드 스코어 산출
+        keyword_score = self._calc_keyword_score(categories, matched_kws)
+        ai_score = self._calc_ai_score(ai_inappropriate, ai_confidence)
+        hybrid_score = (self.WEIGHT_AI * ai_score) + (self.WEIGHT_KEYWORD * keyword_score)
 
-        # 신뢰도 보정: 키워드 히트 시 최소 0.6 보장
-        if keyword_hit and confidence < 0.6:
-            confidence = 0.6
+        # 최종 판정
+        is_inappropriate = hybrid_score >= self.HYBRID_THRESHOLD
+        severity = self._determine_severity(hybrid_score)
 
         return AnalysisResult(
             post=post,
             is_inappropriate=is_inappropriate,
-            confidence=confidence,
+            confidence=hybrid_score,
             categories=categories,
             matched_keywords=matched_kws,
             ai_reason=ai_reason,
             severity=severity,
             raw_content=raw_content,
+            hybrid_score=hybrid_score,
+            keyword_score=keyword_score,
+            ai_score=ai_score,
         )
 
     def analyze_batch(self, posts: list[NaverPost]) -> AnalysisSummary:
@@ -170,9 +275,15 @@ class ContentAnalyzer:
                 summary.inappropriate_count += 1
                 summary.results.append(result)
 
+        total_tokens = self._total_prompt_tokens + self._total_completion_tokens
         logger.info(
-            "분석 완료 — 전체: %d건, 부적절: %d건",
+            "분석 완료 — 전체: %d건, 부적절: %d건 | "
+            "토큰 사용량: prompt=%d, completion=%d, total=%d (요청 %d회)",
             summary.total_checked,
             summary.inappropriate_count,
+            self._total_prompt_tokens,
+            self._total_completion_tokens,
+            total_tokens,
+            self._total_requests,
         )
         return summary
