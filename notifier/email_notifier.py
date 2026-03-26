@@ -426,3 +426,99 @@ class EmailNotifier:
                     logger.error("이메일 발송 실패: %s", e)
                     return False
         return False
+
+    def send_scrape_alert(self, failures: list[dict]) -> bool:
+        """스크래핑 실패 경고 메일 발송
+
+        failures: [{"url": str, "source": str, "title": str, "error": str}, ...]
+        """
+        if not failures:
+            return True
+        if not self.sender or not self.recipients:
+            logger.warning("이메일 설정 미완료 — 스크래핑 경고 발송 생략")
+            return False
+
+        access_token = self._get_oauth2_token()
+        if not access_token:
+            return False
+
+        now = datetime.now()
+        subject = (
+            f"{self.subject_prefix} 스크래핑 실패 경고 — {len(failures)}건 "
+            f"[{now.strftime('%Y-%m-%d %H:%M')}]"
+        )
+
+        rows = ""
+        for f in failures:
+            safe_title = html.escape(f.get("title", "(제목 없음)"))
+            safe_url = html.escape(f.get("url", ""))
+            source = "블로그" if f.get("source") == "blog" else "카페"
+            safe_error = html.escape(f.get("error", "알 수 없음"))
+            rows += f"""
+            <tr>
+              <td style="padding:8px;border:1px solid #ddd;">
+                <a href="{safe_url}" style="color:#1a73e8;">{safe_title}</a>
+              </td>
+              <td style="padding:8px;border:1px solid #ddd;text-align:center;">{source}</td>
+              <td style="padding:8px;border:1px solid #ddd;color:#c0392b;">{safe_error}</td>
+            </tr>"""
+
+        html_body = f"""<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"></head>
+<body style="font-family:Apple SD Gothic Neo,sans-serif;color:#333;margin:20px;">
+  <h2 style="color:#e67e22;">&#9888; 스크래핑 실패 경고</h2>
+  <p style="color:#666;">
+    {now.strftime('%Y-%m-%d %H:%M')} 모니터링 사이클에서
+    <strong>{len(failures)}건</strong>의 게시글 전문 스크래핑에 실패했습니다.<br>
+    DOM 구조 변경 또는 네트워크 오류가 원인일 수 있습니다.
+  </p>
+  <table style="border-collapse:collapse;width:100%;font-size:13px;">
+    <thead>
+      <tr style="background:#f5f5f5;">
+        <th style="padding:8px;border:1px solid #ddd;">게시글</th>
+        <th style="padding:8px;border:1px solid #ddd;">출처</th>
+        <th style="padding:8px;border:1px solid #ddd;">실패 사유</th>
+      </tr>
+    </thead>
+    <tbody>{rows}</tbody>
+  </table>
+  <p style="color:#999;font-size:11px;margin-top:20px;">
+    selector 매칭 실패가 반복되면 DOM 구조 변경을 의심하세요.<br>
+    crawler/content_scraper.py 의 _CONTENT_SELECTORS 를 확인하세요.
+  </p>
+</body>
+</html>"""
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = self.sender
+        msg["To"] = ", ".join(self.recipients)
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        for attempt in range(2):
+            try:
+                auth_string = f"user={self.sender}\x01auth=Bearer {access_token}\x01\x01"
+                with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                    server.starttls()
+                    server.docmd("AUTH", "XOAUTH2 " + base64.b64encode(auth_string.encode()).decode())
+                    server.sendmail(self.sender, self.recipients, msg.as_string())
+                logger.info("스크래핑 경고 메일 발송 성공 → %s (%d건)", self.recipients, len(failures))
+                return True
+            except smtplib.SMTPException as e:
+                is_auth_error = (
+                    isinstance(e, smtplib.SMTPAuthenticationError)
+                    or (isinstance(e, smtplib.SMTPResponseException) and e.smtp_code in (530, 535))
+                )
+                if is_auth_error and attempt == 0:
+                    logger.warning("SMTP 인증 실패 (%s) — 토큰 강제 갱신 후 재시도", e)
+                    access_token = self._get_oauth2_token(force_refresh=True)
+                    if not access_token:
+                        return False
+                elif is_auth_error:
+                    logger.error("토큰 갱신 후에도 SMTP 인증 실패: %s", e)
+                    return False
+                else:
+                    logger.error("스크래핑 경고 메일 발송 실패: %s", e)
+                    return False
+        return False

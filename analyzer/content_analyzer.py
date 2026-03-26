@@ -110,7 +110,8 @@ class ContentAnalyzer:
     # ─── 2단계: LLM 문맥 분석 ────────────────────────────────────────
 
     def _build_prompt(self, post: NaverPost) -> str:
-        content = f"제목: {post.title}\n내용: {post.description}"
+        body = post.full_content if post.full_content else post.description
+        content = f"제목: {post.title}\n내용: {body}"
         category_list = "\n".join(f"- {cat}" for cat in INAPPROPRIATE_CATEGORIES.keys())
         return f"""당신은 병원 평판 모니터링 전문가입니다.
 아래 게시글이 '{TARGET_HOSPITAL}'에 대해 부적절한 표현을 포함하고 있는지 분석하세요.
@@ -233,7 +234,8 @@ class ContentAnalyzer:
 
     def analyze(self, post: NaverPost) -> AnalysisResult:
         """게시글 단건 하이브리드 분석 (LLM 70% + 키워드 30%)"""
-        raw_content = f"{post.title} {post.description}"
+        body = post.full_content if post.full_content else post.description
+        raw_content = f"{post.title} {body}"
 
         # 1단계: 키워드 필터
         categories, matched_kws = self.keyword_filter(raw_content)

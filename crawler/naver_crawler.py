@@ -21,13 +21,14 @@ class NaverPost:
     """수집된 게시글/댓글 단위"""
     source: str          # "blog" | "cafe"
     title: str
-    description: str     # 미리보기 텍스트
+    description: str     # 미리보기 텍스트 (API 제공, ~200자)
     link: str
     blogger_name: str    # 블로그명 또는 카페명
     cafe_name: str       # 카페 전용 (blog이면 빈 문자열)
     post_date: str       # 원문 날짜 문자열 (yyyyMMddTHHmmss+0900)
     keyword: str         # 검색에 사용된 키워드
     collected_at: str    # 수집 시각 (ISO 8601)
+    full_content: str = ""  # 전문 스크래핑 결과 (없으면 빈 문자열)
 
 
 class NaverCrawler:

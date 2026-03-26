@@ -7,6 +7,7 @@ import logging
 
 from config import SEARCH_KEYWORDS, SCHEDULE_INTERVAL_MINUTES, SEARCH_DISPLAY, SEARCH_DAYS
 from crawler.naver_crawler import NaverCrawler
+from crawler.content_scraper import ContentScraper
 from analyzer.content_analyzer import ContentAnalyzer
 from storage import create_storage
 from notifier.email_notifier import EmailNotifier
@@ -19,6 +20,7 @@ class MonitorJob:
 
     def __init__(self):
         self.crawler = NaverCrawler(display=SEARCH_DISPLAY)
+        self.scraper = ContentScraper()
         self.analyzer = ContentAnalyzer()
         self.db = create_storage()
         self.notifier = EmailNotifier()
@@ -47,7 +49,7 @@ class MonitorJob:
                 else:
                     dup_count += 1
 
-            logger.info("[3/5] DB 저장: 신규 %d건, 중복 스킵 %d건", len(new_posts), dup_count)
+            logger.info("[3/6] DB 저장: 신규 %d건, 중복 스킵 %d건", len(new_posts), dup_count)
 
             if not new_posts:
                 stats = self.db.get_stats()
@@ -55,25 +57,52 @@ class MonitorJob:
                             stats["total_posts"], stats["total_detections"])
                 return
 
-            # 4. 분석
+            # 4. 키워드 매칭된 게시글만 전문 스크래핑
+            scrape_count = 0
+            scrape_failures: list[dict] = []
+            for post in new_posts:
+                raw = f"{post.title} {post.description}"
+                categories, matched_kws = self.analyzer.keyword_filter(raw)
+                if matched_kws:
+                    full_text = self.scraper.scrape(post)
+                    if full_text:
+                        post.full_content = full_text
+                        scrape_count += 1
+                        logger.debug("  전문 스크래핑 성공: %s (%d자)", post.title[:30], len(full_text))
+                    else:
+                        scrape_failures.append({
+                            "url": post.link,
+                            "source": post.source,
+                            "title": post.title,
+                            "error": "selector 매칭 실패 (DOM 구조 변경 가능성)",
+                        })
+                        logger.debug("  전문 스크래핑 실패 (description 사용): %s", post.title[:30])
+            logger.info("[4/6] 전문 스크래핑: 대상 %d건, 성공 %d건, 실패 %d건",
+                        scrape_count + len(scrape_failures), scrape_count, len(scrape_failures))
+
+            # 스크래핑 실패 경고 메일
+            if scrape_failures:
+                self.notifier.send_scrape_alert(scrape_failures)
+
+            # 5. 분석
             summary = self.analyzer.analyze_batch(new_posts)
-            logger.info("[4/5] 분석 완료: 전체 %d건, 키워드 매칭 → LLM 호출 %d건, 부적절 판정 %d건",
+            logger.info("[5/6] 분석 완료: 전체 %d건, 키워드 매칭 → LLM 호출 %d건, 부적절 판정 %d건",
                         summary.total_checked,
                         self.analyzer._total_requests,
                         summary.inappropriate_count)
 
-            # 5. 탐지 결과 저장
+            # 6. 탐지 결과 저장
             for result in summary.results:
                 self.db.save_detection(result)
                 logger.info("  [탐지] %s | %s | 심각도=%s | 점수=%.2f | 사유=%s",
                             result.post.source, result.post.title[:40],
                             result.severity, result.hybrid_score, result.ai_reason[:50])
 
-            # 6. 이메일 알림
+            # 7. 이메일 알림
             if summary.results:
                 success = self.notifier.send(summary.results)
                 status = "success" if success else "failed"
-                logger.info("[5/5] 이메일 발송: %s (%d건 → %s)",
+                logger.info("[6/6] 이메일 발송: %s (%d건 → %s)",
                             status, len(summary.results), self.notifier.recipients)
                 for recipient in self.notifier.recipients:
                     self.db.save_notification(
@@ -83,7 +112,7 @@ class MonitorJob:
                         status=status,
                     )
             else:
-                logger.info("[5/5] 부적절 게시글 없음 — 이메일 발송 생략")
+                logger.info("[6/6] 부적절 게시글 없음 — 이메일 발송 생략")
 
             stats = self.db.get_stats()
             logger.info(

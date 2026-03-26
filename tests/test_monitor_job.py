@@ -28,8 +28,9 @@ class TestMonitorJob:
     @patch("scheduler.monitor_job.EmailNotifier")
     @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
+    @patch("scheduler.monitor_job.ContentScraper")
     @patch("scheduler.monitor_job.NaverCrawler")
-    def test_run_no_new_posts(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
+    def test_run_no_new_posts(self, MockCrawler, MockScraper, MockAnalyzer, MockDB, MockNotifier):
         from scheduler.monitor_job import MonitorJob
         job = MonitorJob()
         job.db.get_known_links.return_value = set()
@@ -42,14 +43,16 @@ class TestMonitorJob:
     @patch("scheduler.monitor_job.EmailNotifier")
     @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
+    @patch("scheduler.monitor_job.ContentScraper")
     @patch("scheduler.monitor_job.NaverCrawler")
-    def test_run_with_new_posts_no_detection(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
+    def test_run_with_new_posts_no_detection(self, MockCrawler, MockScraper, MockAnalyzer, MockDB, MockNotifier):
         from scheduler.monitor_job import MonitorJob
         job = MonitorJob()
         post = _make_post()
         job.db.get_known_links.return_value = set()
         job.crawler.collect_all.return_value = [post]
         job.db.save_post.return_value = True
+        job.analyzer.keyword_filter.return_value = ([], [])
         job.analyzer.analyze_batch.return_value = AnalysisSummary(
             total_checked=1, inappropriate_count=0, results=[],
         )
@@ -62,8 +65,9 @@ class TestMonitorJob:
     @patch("scheduler.monitor_job.EmailNotifier")
     @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
+    @patch("scheduler.monitor_job.ContentScraper")
     @patch("scheduler.monitor_job.NaverCrawler")
-    def test_run_with_detection_sends_email(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
+    def test_run_with_detection_sends_email(self, MockCrawler, MockScraper, MockAnalyzer, MockDB, MockNotifier):
         from scheduler.monitor_job import MonitorJob
         job = MonitorJob()
         post = _make_post()
@@ -71,6 +75,8 @@ class TestMonitorJob:
         job.db.get_known_links.return_value = set()
         job.crawler.collect_all.return_value = [post]
         job.db.save_post.return_value = True
+        job.analyzer.keyword_filter.return_value = (["욕설/비하"], ["쓰레기"])
+        job.scraper.scrape.return_value = "전문 텍스트"
         job.analyzer.analyze_batch.return_value = AnalysisSummary(
             total_checked=1, inappropriate_count=1, results=[result],
         )
@@ -85,8 +91,9 @@ class TestMonitorJob:
     @patch("scheduler.monitor_job.EmailNotifier")
     @patch("scheduler.monitor_job.create_storage")
     @patch("scheduler.monitor_job.ContentAnalyzer")
+    @patch("scheduler.monitor_job.ContentScraper")
     @patch("scheduler.monitor_job.NaverCrawler")
-    def test_run_duplicate_posts_filtered(self, MockCrawler, MockAnalyzer, MockDB, MockNotifier):
+    def test_run_duplicate_posts_filtered(self, MockCrawler, MockScraper, MockAnalyzer, MockDB, MockNotifier):
         from scheduler.monitor_job import MonitorJob
         job = MonitorJob()
         post = _make_post()
