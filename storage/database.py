@@ -48,6 +48,7 @@ class SqliteStorage(StorageBackend):
                     source      TEXT,
                     title       TEXT,
                     description TEXT,
+                    full_content TEXT DEFAULT '',
                     blogger_name TEXT,
                     cafe_name   TEXT,
                     post_date   TEXT,
@@ -88,6 +89,13 @@ class SqliteStorage(StorageBackend):
                 CREATE INDEX IF NOT EXISTS idx_notifications_sent_at
                     ON notifications(sent_at);
             """)
+        # 기존 DB 마이그레이션: full_content 컬럼 추가
+        with self._conn() as conn:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(posts)").fetchall()]
+            if "full_content" not in cols:
+                conn.execute("ALTER TABLE posts ADD COLUMN full_content TEXT DEFAULT ''")
+                logger.info("posts 테이블에 full_content 컬럼 추가 완료")
+
         logger.debug("DB 테이블 초기화 완료: %s", self.db_path)
 
     # ─── 게시글 저장 ─────────────────────────────────────────────
@@ -108,11 +116,12 @@ class SqliteStorage(StorageBackend):
             try:
                 conn.execute(
                     """INSERT INTO posts
-                       (link, source, title, description, blogger_name,
-                        cafe_name, post_date, keyword, collected_at)
-                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                       (link, source, title, description, full_content,
+                        blogger_name, cafe_name, post_date, keyword, collected_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (
                         post.link, post.source, post.title, post.description,
+                        getattr(post, 'full_content', ''),
                         post.blogger_name, post.cafe_name, post.post_date,
                         post.keyword, post.collected_at,
                     ),
@@ -120,6 +129,14 @@ class SqliteStorage(StorageBackend):
                 return True
             except sqlite3.IntegrityError:
                 return False  # 중복
+
+    def update_post_full_content(self, link: str, full_content: str):
+        """전문 스크래핑 결과를 기존 게시글에 업데이트"""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE posts SET full_content = ? WHERE link = ?",
+                (full_content, link),
+            )
 
     # ─── 탐지 결과 저장 ──────────────────────────────────────────
 
@@ -389,6 +406,75 @@ class SqliteStorage(StorageBackend):
                 (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ─── 게시글 조회 ───────────────────────────────────────────
+
+    def get_posts_page(
+        self,
+        page: int = 1,
+        per_page: int = 20,
+        source: str = "",
+        keyword: str = "",
+        cafe_name: str = "",
+        scrape: str = "",
+    ) -> tuple[int, list[dict]]:
+        """필터/페이지네이션 게시글 목록 반환 — (total, items)"""
+        offset = (page - 1) * per_page
+        where_clauses = ["1=1"]
+        params: list = []
+
+        if source:
+            where_clauses.append("source = ?")
+            params.append(source)
+        if keyword:
+            where_clauses.append("(title LIKE ? OR description LIKE ?)")
+            like = f"%{keyword}%"
+            params.extend([like, like])
+        if cafe_name:
+            where_clauses.append("cafe_name LIKE ?")
+            params.append(f"%{cafe_name}%")
+        if scrape == "scraped":
+            where_clauses.append("full_content != ''")
+        elif scrape == "not_scraped":
+            where_clauses.append("(full_content IS NULL OR full_content = '')")
+
+        where = " AND ".join(where_clauses)
+
+        with self._conn() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM posts WHERE {where}", params
+            ).fetchone()[0]
+
+            rows = conn.execute(
+                f"""SELECT id, link, source, title, description, full_content,
+                           blogger_name, cafe_name, post_date, keyword, collected_at
+                    FROM posts WHERE {where}
+                    ORDER BY collected_at DESC
+                    LIMIT ? OFFSET ?""",
+                [*params, per_page, offset],
+            ).fetchall()
+
+        return total, [dict(r) for r in rows]
+
+    def get_post_detail(self, link: str) -> dict | None:
+        """게시글 상세 정보 반환 — 없으면 None"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM posts WHERE link = ?", (link,)
+            ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    def get_cafe_list(self) -> list[dict]:
+        """수집된 카페 목록 반환 — [{cafe_name, count}]"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT cafe_name, COUNT(*) as count
+                   FROM posts WHERE source = 'cafe' AND cafe_name != ''
+                   GROUP BY cafe_name ORDER BY count DESC"""
+            ).fetchall()
+        return [{"cafe_name": r["cafe_name"], "count": r["count"]} for r in rows]
 
 
 # 하위 호환: 기존 `from storage.database import Database` 유지

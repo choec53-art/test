@@ -22,6 +22,10 @@ class StorageBackend(ABC):
     def save_post(self, post) -> bool:
         """게시글 저장. 이미 존재하면 False 반환."""
 
+    @abstractmethod
+    def update_post_full_content(self, link: str, full_content: str):
+        """전문 스크래핑 결과를 기존 게시글에 업데이트"""
+
     # ─── 탐지 결과 ──────────────────────────────────────────────
 
     @abstractmethod
@@ -84,3 +88,25 @@ class StorageBackend(ABC):
     @abstractmethod
     def get_notification_history(self, limit: int = 50) -> list[dict]:
         """알림 발송 이력"""
+
+    # ─── 게시글 조회 ──────────────────────────────────────────
+
+    @abstractmethod
+    def get_posts_page(
+        self,
+        page: int = 1,
+        per_page: int = 20,
+        source: str = "",
+        keyword: str = "",
+        cafe_name: str = "",
+        scrape: str = "",
+    ) -> tuple[int, list[dict]]:
+        """필터/페이지네이션 게시글 목록 — (total, items)"""
+
+    @abstractmethod
+    def get_post_detail(self, link: str) -> dict | None:
+        """게시글 상세 정보 (link 기준) — 없으면 None"""
+
+    @abstractmethod
+    def get_cafe_list(self) -> list[dict]:
+        """수집된 카페 목록 — [{cafe_name, count}]"""

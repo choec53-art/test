@@ -204,7 +204,10 @@
 
 <header>
   <h1>🏥 {{ hospital }} — 콘텐츠 모니터링</h1>
-  <span class="badge">매 {{ interval }}분 자동 수집</span>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <a href="/posts" style="color:rgba(255,255,255,0.85);text-decoration:none;font-size:13px;padding:3px 12px;border:1px solid rgba(255,255,255,0.3);border-radius:12px;">수집 게시글</a>
+    <span class="badge">매 {{ interval }}분 자동 수집</span>
+  </div>
 </header>
 
 <div class="container">

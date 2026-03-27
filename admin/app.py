@@ -121,5 +121,60 @@ def api_notifications():
     return jsonify(items)
 
 
+# ─── 게시글 뷰어 API ─────────────────────────────────────────
+
+@app.route("/posts")
+def posts_page():
+    """수집 게시글 뷰어 페이지"""
+    return render_template("posts.html",
+                           hospital=TARGET_HOSPITAL)
+
+
+@app.route("/api/posts")
+@require_auth
+def api_posts():
+    """게시글 목록 (페이지네이션 + 필터)"""
+    page = max(int(request.args.get("page", 1)), 1)
+    per_page = int(request.args.get("per_page", 20))
+    source = request.args.get("source", "")
+    keyword = request.args.get("keyword", "")
+    cafe_name = request.args.get("cafe_name", "")
+    scrape = request.args.get("scrape", "")
+
+    total, items = db.get_posts_page(
+        page=page, per_page=per_page,
+        source=source, keyword=keyword, cafe_name=cafe_name,
+        scrape=scrape,
+    )
+
+    return jsonify({
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": max(1, (total + per_page - 1) // per_page),
+        "items": items,
+    })
+
+
+@app.route("/api/posts/detail")
+@require_auth
+def api_post_detail():
+    """게시글 상세 (link 파라미터)"""
+    link = request.args.get("link", "")
+    if not link:
+        return jsonify({"error": "link parameter required"}), 400
+    item = db.get_post_detail(link)
+    if not item:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(item)
+
+
+@app.route("/api/cafes")
+@require_auth
+def api_cafes():
+    """카페 목록"""
+    return jsonify(db.get_cafe_list())
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)

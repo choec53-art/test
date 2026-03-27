@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>수집 게시글 — {{ hospital }}</title>
+<style>
+  :root {
+    --bg: #f8f9fa; --card: #fff; --border: #e0e0e0; --text: #333;
+    --muted: #888; --accent: #1a73e8; --blog: #4caf50; --cafe: #ff9800;
+    --tag-bg: #e8f0fe; --scraped: #2e7d32; --not-scraped: #bdbdbd;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, 'Pretendard', 'Noto Sans KR', sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+  }
+
+  /* ── 헤더 ── */
+  .header {
+    background: linear-gradient(135deg, #1a237e, #283593);
+    color: #fff; padding: 20px 24px;
+  }
+  .header h1 { font-size: 1.3rem; font-weight: 700; }
+  .header .sub { font-size: 0.85rem; opacity: 0.8; margin-top: 4px; }
+  .header nav { margin-top: 12px; display: flex; gap: 12px; }
+  .header nav a {
+    color: rgba(255,255,255,0.85); text-decoration: none; font-size: 0.85rem;
+    padding: 4px 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.3);
+  }
+  .header nav a:hover, .header nav a.active {
+    background: rgba(255,255,255,0.15); color: #fff;
+  }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 20px 16px; }
+
+  /* ── 통계 바 ── */
+  .stats-bar {
+    display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .stat-chip {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 16px; font-size: 0.85rem; flex: 1; min-width: 100px; text-align: center;
+  }
+  .stat-chip strong { display: block; font-size: 1.4rem; color: var(--accent); }
+
+  /* ── 필터 바 ── */
+  .filter-bar {
+    display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;
+  }
+  .filter-bar select, .filter-bar input {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.85rem; background: #fff;
+  }
+  .filter-bar input { flex: 1; min-width: 180px; }
+  .filter-bar button {
+    padding: 8px 16px; background: var(--accent); color: #fff; border: none;
+    border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+  }
+  .filter-bar button:hover { opacity: 0.9; }
+  .btn-reset { background: #666 !important; }
+
+  /* ── 카드 ── */
+  .post-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    transition: box-shadow 0.2s;
+  }
+  .post-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+
+  .card-top { padding: 14px 18px 10px; cursor: pointer; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.7rem; font-weight: 600; color: #fff; margin-right: 6px;
+  }
+  .badge.blog { background: var(--blog); }
+  .badge.cafe { background: var(--cafe); }
+  .badge.scraped { background: var(--scraped); }
+  .badge.not-scraped { background: var(--not-scraped); }
+
+  .card-title {
+    font-size: 1rem; font-weight: 600; margin: 6px 0;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card-title a { color: var(--text); text-decoration: none; }
+  .card-title a:hover { color: var(--accent); }
+  .card-meta {
+    font-size: 0.76rem; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap;
+  }
+
+  /* ── 확장 영역 ── */
+  .card-expand { display: none; border-top: 1px solid var(--border); }
+  .card-expand.open { display: block; }
+
+  .content-section { padding: 14px 18px; }
+  .desc-box {
+    padding: 12px 14px; border-radius: 8px; font-size: 0.86rem;
+    white-space: pre-wrap; word-break: break-word; margin-bottom: 10px;
+  }
+  .desc-box.api { background: #fff3e0; border: 1px solid #ffe0b2; }
+  .desc-box.full { background: #e8f5e9; border: 1px solid #c8e6c9; }
+  .desc-box .box-head {
+    font-size: 0.72rem; font-weight: 700; color: var(--muted); margin-bottom: 6px;
+    display: flex; justify-content: space-between;
+  }
+
+  .link-row { padding: 0 18px 14px; }
+  .link-row a {
+    font-size: 0.82rem; color: var(--accent); word-break: break-all;
+  }
+
+  /* ── 페이지네이션 ── */
+  .pagination {
+    display: flex; justify-content: center; gap: 6px; margin: 24px 0; flex-wrap: wrap;
+  }
+  .pagination button {
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: #fff; cursor: pointer; font-size: 0.85rem;
+  }
+  .pagination button.active {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+  .pagination button:disabled { opacity: 0.4; cursor: default; }
+
+  /* ── 로딩/빈 상태 ── */
+  .loading { text-align: center; padding: 40px; color: var(--muted); }
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+
+  /* ── 반응형 ── */
+  @media (max-width: 600px) {
+    .header { padding: 16px; }
+    .header h1 { font-size: 1.1rem; }
+    .container { padding: 12px 8px; }
+    .stats-bar { gap: 8px; }
+    .stat-chip { padding: 8px 10px; min-width: 70px; }
+    .stat-chip strong { font-size: 1.1rem; }
+    .filter-bar { gap: 6px; }
+    .filter-bar select, .filter-bar input { font-size: 0.8rem; padding: 6px 8px; }
+    .card-top { padding: 12px 14px 8px; }
+    .card-title { font-size: 0.92rem; }
+    .card-meta { font-size: 0.7rem; gap: 8px; }
+    .content-section { padding: 12px 14px; }
+    .desc-box { font-size: 0.82rem; padding: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>{{ hospital }} 수집 게시글</h1>
+  <div class="sub">네이버 블로그/카페 수집 데이터 뷰어</div>
+  <nav>
+    <a href="/">대시보드</a>
+    <a href="/posts" class="active">수집 게시글</a>
+  </nav>
+</div>
+
+<div class="container">
+  <!-- 통계 -->
+  <div class="stats-bar">
+    <div class="stat-chip"><strong id="stat-total">-</strong>전체 수집</div>
+    <div class="stat-chip"><strong id="stat-blog">-</strong>블로그</div>
+    <div class="stat-chip"><strong id="stat-cafe">-</strong>카페</div>
+    <div class="stat-chip"><strong id="stat-scraped">-</strong>전문 수집</div>
+    <div class="stat-chip"><strong id="stat-pages">-</strong>페이지</div>
+  </div>
+
+  <!-- 필터 -->
+  <div class="filter-bar">
+    <select id="f-source">
+      <option value="">전체 출처</option>
+      <option value="blog">블로그</option>
+      <option value="cafe">카페</option>
+    </select>
+    <select id="f-cafe">
+      <option value="">전체 카페</option>
+    </select>
+    <select id="f-scrape">
+      <option value="">전문 여부</option>
+      <option value="scraped">전문 있음</option>
+      <option value="not_scraped">전문 없음</option>
+    </select>
+    <input type="text" id="f-keyword" placeholder="키워드 검색 (제목/본문)">
+    <button onclick="applyFilter()">검색</button>
+    <button class="btn-reset" onclick="resetFilter()">초기화</button>
+  </div>
+
+  <!-- 리스트 -->
+  <div id="post-list"></div>
+
+  <!-- 페이지네이션 -->
+  <div class="pagination" id="pagination"></div>
+</div>
+
+<script>
+const API = '';
+let currentPage = 1;
+let perPage = 10;
+let filters = { source: '', keyword: '', cafe_name: '', scrape: '' };
+
+// ── 초기화 ──
+document.addEventListener('DOMContentLoaded', () => {
+  loadCafes();
+  loadPosts();
+  document.getElementById('f-keyword').addEventListener('keydown', e => {
+    if (e.key === 'Enter') applyFilter();
+  });
+});
+
+// ── 카페 목록 로드 ──
+async function loadCafes() {
+  try {
+    const res = await fetch(`${API}/api/cafes`);
+    const cafes = await res.json();
+    const sel = document.getElementById('f-cafe');
+    cafes.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.cafe_name;
+      const name = c.cafe_name.length > 20 ? c.cafe_name.slice(0, 20) + '...' : c.cafe_name;
+      opt.textContent = `${name} (${c.count})`;
+      sel.appendChild(opt);
+    });
+  } catch (e) { console.error('카페 목록 로드 실패', e); }
+}
+
+// ── 게시글 로드 ──
+async function loadPosts() {
+  const list = document.getElementById('post-list');
+  list.innerHTML = '<div class="loading">불러오는 중...</div>';
+
+  const params = new URLSearchParams({
+    page: currentPage, per_page: perPage,
+    source: filters.source, keyword: filters.keyword, cafe_name: filters.cafe_name,
+    scrape: filters.scrape,
+  });
+
+  try {
+    const res = await fetch(`${API}/api/posts?${params}`);
+    const data = await res.json();
+
+    // 통계 업데이트
+    document.getElementById('stat-total').textContent = data.total.toLocaleString();
+    document.getElementById('stat-pages').textContent = `${data.page}/${data.total_pages}`;
+
+    updateSourceStats();
+
+    if (data.items.length === 0) {
+      list.innerHTML = '<div class="empty">게시글이 없습니다</div>';
+      document.getElementById('pagination').innerHTML = '';
+      return;
+    }
+
+    list.innerHTML = data.items.map((p, i) => renderCard(p, i)).join('');
+    renderPagination(data.page, data.total_pages);
+  } catch (e) {
+    list.innerHTML = '<div class="empty">데이터를 불러올 수 없습니다</div>';
+    console.error(e);
+  }
+}
+
+// ── 출처별 / 전문 수집 통계 ──
+async function updateSourceStats() {
+  try {
+    const [blogRes, cafeRes, scrapedRes] = await Promise.all([
+      fetch(`${API}/api/posts?per_page=1&source=blog`),
+      fetch(`${API}/api/posts?per_page=1&source=cafe`),
+      fetch(`${API}/api/posts?per_page=1&scrape=scraped`),
+    ]);
+    const [blogData, cafeData, scrapedData] = await Promise.all([
+      blogRes.json(), cafeRes.json(), scrapedRes.json(),
+    ]);
+    document.getElementById('stat-blog').textContent = blogData.total.toLocaleString();
+    document.getElementById('stat-cafe').textContent = cafeData.total.toLocaleString();
+    document.getElementById('stat-scraped').textContent = scrapedData.total.toLocaleString();
+  } catch (e) {}
+}
+
+// ── 카드 렌더링 ──
+function renderCard(p, idx) {
+  const source = p.source === 'blog' ? '블로그' : '카페';
+  const badgeCls = p.source;
+  const author = p.source === 'cafe'
+    ? (p.cafe_name || '').slice(0, 25)
+    : (p.blogger_name || '').slice(0, 25);
+  const date = p.post_date
+    ? p.post_date.replace(/(\d{4})(\d{2})(\d{2}).*/, '$1-$2-$3')
+    : (p.collected_at || '').slice(0, 10);
+  const collected = (p.collected_at || '').replace('T', ' ').slice(0, 16);
+  const descLen = (p.description || '').length;
+  const hasFullContent = p.full_content && p.full_content.length > 0;
+  const fullLen = hasFullContent ? p.full_content.length : 0;
+  const scrapeBadge = hasFullContent
+    ? `<span class="badge scraped">전문 ${fullLen}자</span>`
+    : `<span class="badge not-scraped">요약만</span>`;
+
+  let expandContent = '';
+  if (hasFullContent) {
+    expandContent = `
+      <div class="content-section">
+        <div class="desc-box full">
+          <div class="box-head">전문 스크래핑 (full_content) <span>${fullLen}자</span></div>
+          ${esc(p.full_content)}
+        </div>
+        <div class="desc-box api">
+          <div class="box-head">API 요약 (description) <span>${descLen}자</span></div>
+          ${esc(p.description)}
+        </div>
+      </div>`;
+  } else {
+    expandContent = `
+      <div class="content-section">
+        <div class="desc-box api">
+          <div class="box-head">API 요약 (description) <span>${descLen}자</span></div>
+          ${esc(p.description)}
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="post-card">
+      <div class="card-top" onclick="toggleCard(${idx})">
+        <span class="badge ${badgeCls}">${source}</span>
+        <span class="badge" style="background:var(--tag-bg);color:var(--accent)">${esc(p.keyword)}</span>
+        ${scrapeBadge}
+        <div class="card-title">${esc(p.title)}</div>
+        <div class="card-meta">
+          <span>${esc(author)}</span>
+          <span>${date}</span>
+          <span>수집: ${collected}</span>
+        </div>
+      </div>
+      <div class="card-expand" id="expand-${idx}">
+        ${expandContent}
+        <div class="link-row">
+          <a href="${esc(p.link)}" target="_blank">${esc(p.link)}</a>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── 카드 토글 ──
+function toggleCard(idx) {
+  document.getElementById(`expand-${idx}`).classList.toggle('open');
+}
+
+// ── 페이지네이션 ──
+function renderPagination(page, totalPages) {
+  const el = document.getElementById('pagination');
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  let html = `<button ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page-1})">이전</button>`;
+
+  const start = Math.max(1, page - 3);
+  const end = Math.min(totalPages, page + 3);
+  if (start > 1) html += `<button onclick="goPage(1)">1</button><span style="padding:6px">...</span>`;
+  for (let i = start; i <= end; i++) {
+    html += `<button class="${i === page ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
+  }
+  if (end < totalPages) html += `<span style="padding:6px">...</span><button onclick="goPage(${totalPages})">${totalPages}</button>`;
+
+  html += `<button ${page >= totalPages ? 'disabled' : ''} onclick="goPage(${page+1})">다음</button>`;
+  el.innerHTML = html;
+}
+
+function goPage(p) {
+  currentPage = p;
+  loadPosts();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── 필터 ──
+function applyFilter() {
+  filters.source = document.getElementById('f-source').value;
+  filters.cafe_name = document.getElementById('f-cafe').value;
+  filters.keyword = document.getElementById('f-keyword').value.trim();
+  filters.scrape = document.getElementById('f-scrape').value;
+  currentPage = 1;
+  loadPosts();
+}
+
+function resetFilter() {
+  document.getElementById('f-source').value = '';
+  document.getElementById('f-cafe').value = '';
+  document.getElementById('f-keyword').value = '';
+  document.getElementById('f-scrape').value = '';
+  filters = { source: '', keyword: '', cafe_name: '', scrape: '' };
+  currentPage = 1;
+  loadPosts();
+}
+
+// ── 유틸 ──
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
