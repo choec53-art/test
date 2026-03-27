@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>수집 데이터 원본 — 전문 스크래핑</title>
+<style>
+  :root {
+    --bg: #f8f9fa;
+    --card: #ffffff;
+    --border: #e0e0e0;
+    --text: #333333;
+    --muted: #888888;
+    --accent: #1a73e8;
+    --blog: #4caf50;
+    --cafe: #ff9800;
+    --comment-bg: #f1f3f5;
+    --tag-bg: #e8f0fe;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Pretendard', 'Noto Sans KR', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 24px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  /* 헤더 */
+  .page-header {
+    text-align: center;
+    padding: 32px 0 24px;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 32px;
+  }
+  .page-header h1 { font-size: 1.6rem; font-weight: 700; }
+  .page-header .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-top: 8px;
+  }
+  .stats {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 16px;
+  }
+  .stat-item {
+    text-align: center;
+    padding: 8px 16px;
+    background: var(--tag-bg);
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+  .stat-item strong { display: block; font-size: 1.3rem; color: var(--accent); }
+
+  /* 카드 */
+  .post-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 24px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+
+  /* 카드 헤더 */
+  .card-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-header .source-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+  .source-badge.blog { background: var(--blog); }
+  .source-badge.cafe { background: var(--cafe); }
+  .card-header h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .card-header h2 a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .card-header h2 a:hover { color: var(--accent); text-decoration: underline; }
+
+  /* 메타 정보 */
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .meta-item { display: flex; align-items: center; gap: 4px; }
+  .meta-item .label { font-weight: 600; color: #666; }
+
+  /* 본문 */
+  .card-body { padding: 20px 24px; }
+  .section-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  /* API 요약 vs 전문 비교 — 상하 배치 */
+  .comparison {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .comp-box {
+    padding: 14px 16px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .comp-box.api {
+    background: #fff3e0;
+    border: 1px solid #ffe0b2;
+  }
+  .comp-box.full {
+    background: #e8f5e9;
+    border: 1px solid #c8e6c9;
+  }
+  .comp-box .box-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--muted);
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .comp-box .box-label .len { font-weight: 400; }
+
+  /* 댓글 */
+  .comments-section {
+    padding: 16px 24px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--comment-bg);
+  }
+  .comment {
+    padding: 10px 14px;
+    background: #fff;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    font-size: 0.88rem;
+    border-left: 3px solid var(--accent);
+  }
+  .comment:last-child { margin-bottom: 0; }
+  .no-comments {
+    font-size: 0.85rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* 푸터 */
+  .page-footer {
+    text-align: center;
+    padding: 24px 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+    border-top: 1px solid var(--border);
+    margin-top: 16px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>수집 데이터 원본 — 전문 스크래핑 결과</h1>
+  <div class="subtitle">조정훈유바외과 네이버 콘텐츠 모니터링 시스템</div>
+  <div class="stats">
+    <div class="stat-item"><strong>5건</strong>스크래핑 성공</div>
+    <div class="stat-item"><strong>548건</strong>누적 수집</div>
+    <div class="stat-item"><strong>0건</strong>부적절 탐지</div>
+    <div class="stat-item"><strong>2026-03-27</strong>조회 시점</div>
+  </div>
+</div>
+
+<!-- ────────── 1. 의료계 뉴스 ────────── -->
+<div class="post-card">
+  <div class="card-header">
+    <span class="source-badge blog">블로그</span>
+    <h2><a href="https://blog.naver.com/k202904/224228097909" target="_blank">2026.03.24 의료계주요뉴스</a></h2>
+    <div class="meta">
+      <div class="meta-item"><span class="label">출처</span> 전주 에덴산부인과</div>
+      <div class="meta-item"><span class="label">작성일</span> 2026-03-24</div>
+      <div class="meta-item"><span class="label">키워드</span> 조정훈유방외과</div>
+      <div class="meta-item"><span class="label">수집</span> 2026-03-26 13:05</div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="comparison">
+      <div class="comp-box api">
+        <div class="box-label">API 요약 <span class="len">~200자</span></div>
+출처:우먼타임스 [건강 365] 봄철 갑작스러운 심한 두통, 뇌동맥류 파열의 신호일 수 있습니다 /고려대의료원 교류협력 대자인병원 신경외과 배홍주 교수 출처...</div>
+      <div class="comp-box full">
+        <div class="box-label">전문 스크래핑 <span class="len">5,000자</span></div>
+2026.03.24의료계주요뉴스
+
+《FOCUS 》
+
+건보공단 특사경 '초읽기'...의협 "검사 통제 부재로 폭주 우려"
+-의협, 건보공단 특사경법 관련 최신 공식 입장 전달.
+공소청법 통과로 검사 특사경 통제권 부재도 우려...
+"권한 남용 될 것" "재정관리 기관에 수사권까지" 권한 집중·과잉 입법도 비판
+출처:의학신문
+
+MEDI:GATE NEWS : 건보공단 특사경 법 30일 법사위 상정 예정…
+의료계 법안 통과 여부 주목.
+의료계 1인 시위 나서며 법안 부당함 알려…
+황규석 회장 "이중처벌 우려 생긴다"
+
+건보공단 '특사경' 법사위 상정 임박…의료계 반발 격화
+-공단 "연 2000억 재정 누수 차단"…특사경 필요성 강조.
+의료계 "보험자에 수사권 부여는 권한 충돌" 강력 반발
+
+(이하 의료계 뉴스 다수 포함)</div>
+    </div>
+  </div>
+  <div class="comments-section">
+    <div class="section-label">댓글</div>
+    <div class="no-comments">댓글 없음</div>
+  </div>
+</div>
+
+<!-- ────────── 2. 일요일 진료 안내 ────────── -->
+<div class="post-card">
+  <div class="card-header">
+    <span class="source-badge blog">블로그</span>
+    <h2><a href="https://blog.naver.com/tommyntomo/224222082406" target="_blank">수원 동탄 유방외과 — 일요일 진료 안내</a></h2>
+    <div class="meta">
+      <div class="meta-item"><span class="label">출처</span> 조정훈유바외과진료협력센터</div>
+      <div class="meta-item"><span class="label">작성일</span> 2026-03-19</div>
+      <div class="meta-item"><span class="label">키워드</span> 조정훈유바외과</div>
+      <div class="meta-item"><span class="label">수집</span> 2026-03-26 13:05</div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="comparison">
+      <div class="comp-box api">
+        <div class="box-label">API 요약 <span class="len">~150자</span></div>
+수원 동탄 유방외과 조정훈유바외과입니다. 저희 병원은 평일에 시간내기 어려운 분들을 위해 2025년 5월 1일부터 일요일 진료를 운영하고 있습니다. 주말에도 환자분들의 건강을 위해 최선을...</div>
+      <div class="comp-box full">
+        <div class="box-label">전문 스크래핑 <span class="len">310자</span></div>
+안녕하세요.
+수원 동탄 유방외과 조정훈유바외과입니다.
+
+저희 병원은 평일에 시간내기 어려운 분들을 위해
+2025년 5월 1일부터 일요일 진료를 운영하고 있습니다.
+주말에도 환자분들의 건강을 위해 최선을 다하겠습니다.
+
+병원 이용에 참고하시기 바랍니다.
+
+상담예약 안내
+조정훈유바외과 유방암/갑상선암 클리닉
+수원유방외과, 영통망포역, 유방질환분과전문의,
+유방단층촬영술, 고해상도초음파, 조직검사, 맘모톰, 고주파수술, 갑상선특화진료
+
+진료시간
+  평일) AM09:00 - PM19:00
+  토요일) AM09:00 - PM15:00
+  일요일) AM09:00 - PM13:00
+  (공휴일 휴진)
+
+오시는길: 수원시 영통구 영통로195 골든스퀘어 2층 (망포역 3번출구)
+전화: 031.206.5565</div>
+    </div>
+  </div>
+  <div class="comments-section">
+    <div class="section-label">댓글</div>
+    <div class="no-comments">댓글 없음</div>
+  </div>
+</div>
+
+<!-- ────────── 3. 방문 후기 ────────── -->
+<div class="post-card">
+  <div class="card-header">
+    <span class="source-badge cafe">카페</span>
+    <h2><a href="http://cafe.naver.com/youngtongremodelin/120061" target="_blank">조정훈 유방외과 방문기</a></h2>
+    <div class="meta">
+      <div class="meta-item"><span class="label">출처</span> 수원 영통구 모임터 (광교맘, 망포맘)</div>
+      <div class="meta-item"><span class="label">작성일</span> 2015-11-04</div>
+      <div class="meta-item"><span class="label">키워드</span> 조정훈유방외과</div>
+      <div class="meta-item"><span class="label">수집</span> 2026-03-26 13:26</div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="comparison">
+      <div class="comp-box api">
+        <div class="box-label">API 요약 <span class="len">~200자</span></div>
+유방외과 어디가 좋으냐는 질문에 조정훈 유방외과가 다수의 추천지로 떠올라, 드디어 갔습니다. 여성병원에서 국가건강검진을 간단하게 받던 차에 유방촬영 결과, 치밀유방·비대칭음영 소견 등으로 초음파촬영을 권고...</div>
+      <div class="comp-box full">
+        <div class="box-label">전문 스크래핑 <span class="len">456자</span></div>
+유방외과 어디가 좋으냐는 질문에 조정훈 유방외과가 다수의 추천지로 떠올라, 드디어 갔습니다.
+
+여성병원에서 국가건강검진을 간단하게 받던 차에 유방촬영 결과, 치밀유방·비대칭음영 소견 등으로 초음파촬영을 권고 받아 고민하던 시기였는데 카페에서 팁을 얻은거죠^^
+
+추천회원님들의 말씀처럼 차근차근 꼼꼼하게 보시더군요.
+
+초음파검사 결과는 섬유선종 하나, 조그만 지방덩어리 두 개. 그렇지만 유방암과는 무관한 것들이니 앞으로 1년에 한 번씩 검진을 받으면 된답니다.
+
+그리고 2주 전쯤?부터 보이기 시작한 유륜쪽 녹두만한 혹은 팥만한 지방종을 수술하고 왔습니다. 건강엔 지장 없으나 그래도 없애는게 좋겠다는 원장님 소견에 저도 전적으로 동감했기 때문이죠^^
+
+마취 주사 맞을 때 순간, 따끔*5쯤 아팠구요ㅎ 몇 분 지나지 않아 끝난거 같습니다.
+
+오늘 큰 일을 마무리 지은 기분입니다. 추천해 주신 회원님들, 감사합니다^^</div>
+    </div>
+  </div>
+  <div class="comments-section">
+    <div class="section-label">댓글 (7건)</div>
+    <div class="comment">우리 더욱 건강관리 잘 하시자구요 호호호</div>
+    <div class="comment">우리 건강하고 즐겁게, 적당히 오래 살자구요^^ 회원님들 덕분에 좋은 병원도 알고 고마울 따름이지요ㅎ</div>
+    <div class="comment">저 섬유선종 10년쯤 전부터 있었는데, 이번에 보니 사이즈가 작아졌더라구요. 섬유선종은 아주 별거 아니라고 잘 설명해 주시던데요^^ 화이팅입니다!!!</div>
+    <div class="comment">저두 젖몸살때문에 병원가야하나싶던차에 님글 읽고 지난주 토요일에 다녀왔는데 친절하시더라구요. 저도 님 덕분에 도움받았어요 감사합니다</div>
+    <div class="comment">위치가 어딘가요? → 망포역 골든스퀘어 2층입니다.</div>
+  </div>
+</div>
+
+<!-- ────────── 4. 원장 추천 ────────── -->
+<div class="post-card">
+  <div class="card-header">
+    <span class="source-badge cafe">카페</span>
+    <h2><a href="http://cafe.naver.com/youngtongremodelin/240817" target="_blank">조정훈 유방외과요~</a></h2>
+    <div class="meta">
+      <div class="meta-item"><span class="label">출처</span> 수원 영통구 모임터 (광교맘, 망포맘)</div>
+      <div class="meta-item"><span class="label">작성일</span> 2018-08-11</div>
+      <div class="meta-item"><span class="label">키워드</span> 조정훈유방외과</div>
+      <div class="meta-item"><span class="label">수집</span> 2026-03-26 13:26</div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="comparison">
+      <div class="comp-box api">
+        <div class="box-label">API 요약 <span class="len">~100자</span></div>
+조정훈 유방외과 유선염때문에 왔는데 선생님이 두분이시네요... 두분다 괜찮으신지 아니면 추천하시는분이 있나요?</div>
+      <div class="comp-box full">
+        <div class="box-label">전문 스크래핑 <span class="len">65자</span></div>
+조정훈 유방외과 유선염때문에 왔는데
+선생님이 두분이시네요...
+두분다 괜찮으신지 아니면 추천하시는분이 있나요?</div>
+    </div>
+  </div>
+  <div class="comments-section">
+    <div class="section-label">댓글 (3건)</div>
+    <div class="comment">조원장님, 잘 보세요</div>
+    <div class="comment">남자 원장님 조원장님 왕 꼼꼼하세요</div>
+    <div class="comment">조원장님이요. 전 위치 안좋은데 잘 잡아내주셔서 초기에 반절제 수술로 끝냈어요</div>
+  </div>
+</div>
+
+<!-- ────────── 5. 갑상선 문의 ────────── -->
+<div class="post-card">
+  <div class="card-header">
+    <span class="source-badge cafe">카페</span>
+    <h2><a href="http://cafe.naver.com/bongmammamia/643228" target="_blank">목에 뭔가 걸린 느낌… 갑상선일 수도 있나요?</a></h2>
+    <div class="meta">
+      <div class="meta-item"><span class="label">출처</span> 봉담맘 모여라</div>
+      <div class="meta-item"><span class="label">작성일</span> 2026-03-06</div>
+      <div class="meta-item"><span class="label">키워드</span> 조정훈유바외과</div>
+      <div class="meta-item"><span class="label">수집</span> 2026-03-26 13:05</div>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="comparison">
+      <div class="comp-box api">
+        <div class="box-label">API 요약 <span class="len">~150자</span></div>
+예전에 건강검진에서 갑상선 결절이 아주 작게 있다고 들은 적이 있어서 괜히 그게 신경 쓰이네요… 이런 경우 이비인후과를 가야 하나요? 아니면 내과나 외과 쪽으로 가야 하는지 어디로 진료 보러 가셨는지 궁금해요 ㅠ</div>
+      <div class="comp-box full">
+        <div class="box-label">전문 스크래핑 <span class="len">193자</span></div>
+감기 걸렸다가 회복했는데
+요즘 들어 목소리가 조금 변한 느낌이 있고
+음식 삼킬 때 뭔가 걸리는 듯한 이물감이 있어요.
+
+예전에 건강검진에서
+갑상선 결절이 아주 작게 있다고 들은 적이 있어서
+괜히 그게 신경 쓰이네요…
+
+이런 경우
+이비인후과를 가야 하나요?
+아니면 내과나 외과 쪽으로 가야 하는지
+어디로 진료 보러 가셨는지 궁금해요 ㅠ</div>
+    </div>
+  </div>
+  <div class="comments-section">
+    <div class="section-label">댓글</div>
+    <div class="no-comments">댓글 없음 (등급 제한으로 댓글 미수집)</div>
+  </div>
+</div>
+
+<div class="page-footer">
+  조정훈유바외과 콘텐츠 모니터링 시스템 — 전문 스크래핑 샘플 데이터<br>
+  블로그: requests + BeautifulSoup | 카페: Playwright + 네이버 로그인 세션
+</div>
+
+</body>
+</html>
