@@ -67,6 +67,7 @@ class MonitorJob:
                     full_text = self.scraper.scrape(post)
                     if full_text:
                         post.full_content = full_text
+                        self.db.update_post_full_content(post.link, full_text)
                         scrape_count += 1
                         logger.debug("  전문 스크래핑 성공: %s (%d자)", post.title[:30], len(full_text))
                     else:
